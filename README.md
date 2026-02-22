@@ -1,7 +1,7 @@
 # Heist Key Home — Full-Stack Web Game
 
 **Course:** Open Web (קורס פתוח Web)  
-**Live Demo:** https://heist-key-home-frontend.onrender.com/levels
+**Live Demo:** https://heist-key-home-frontend.onrender.com
 
 ## Overview
 Heist Key Home is a full-stack web game developed as part of the Open Web course. The project is built with a **React (Vite)** frontend and a **Node.js/Express** backend, featuring RESTful API communication and persistent storage with **SQLite**.
