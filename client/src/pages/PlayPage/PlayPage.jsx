@@ -219,18 +219,36 @@ setLocalTicks(t);
         move ?? undefined,
         { signal: abortRef.current.signal }
       );
+
+      // 1) result (win/lose/score/ticks) من السيرفر
       setResult(out.result);
 
-// ✅ خلي ticks ما ينقصش (إذا السيرفر رجّع أقل)
-const serverTicks = Number(out?.result?.ticks ?? 0);
-if (Number.isFinite(serverTicks) && serverTicks > localTicksRef.current) {
-  localTicksRef.current = serverTicks;
-  setLocalTicks(serverTicks);
-}
+      // 2) ticks ما ينقصش
+      const serverTicks = Number(out?.result?.ticks ?? 0);
+      if (Number.isFinite(serverTicks) && serverTicks > localTicksRef.current) {
+        localTicksRef.current = serverTicks;
+        setLocalTicks(serverTicks);
+      }
 
-// ❌ ممنوع نطبق فريم السيرفر على حركة اللاعب (عشان ما في رجعة للخلف)
-// setFrame(out.frame);
-// frameRef.current = out.frame;
+      // 3) ✅ أهم سطرين: خدي فريم السيرفر للحراس + خلي اللاعب من الكلاينت
+      const clientPlayer = frameRef.current?.player;
+      let mergedFrame = out.frame;
+
+      if (mergedFrame && clientPlayer) {
+        mergedFrame = {
+          ...mergedFrame,
+          player: {
+            ...mergedFrame.player,
+            x: clientPlayer.x,
+            y: clientPlayer.y,
+            // ✅ ما تخليها ترجع false بالغلط
+            hasKey: !!mergedFrame.player?.hasKey || !!clientPlayer.hasKey,
+          },
+        };
+      }
+
+      setFrame(mergedFrame);
+      frameRef.current = mergedFrame;
 
       if (out?.result?.lose) {
         await handleLose();
