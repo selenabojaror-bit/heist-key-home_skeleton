@@ -15,7 +15,7 @@ function normalizeLevel(levelRaw) {
     home: levelRaw?.home ?? { x: w - 1, y: h - 1 },
     walls: Array.isArray(levelRaw?.walls) ? levelRaw.walls : [],
     guards: Array.isArray(levelRaw?.guards) ? levelRaw.guards : [],
-    cameras: [], // ✅ ما في كاميرات
+    cameras: [],
   };
 }
 
@@ -78,16 +78,13 @@ export function makeRenderer(canvas) {
   if (!canvas) throw new Error("Canvas not found");
   const ctx = canvas.getContext("2d");
 
-  // ✅ أهم تعديل: خلي المسار مطلق (/assets/...)
   const AS = "/assets/";
 
-  // صور world
   const floorImg = loadImg(AS + "sprites/world/grass.png");
   const wallImg = loadImg(AS + "sprites/world/wall.png");
   const houseImg = loadImg(AS + "sprites/world/house.png");
   const keyImg = loadImg(AS + "sprites/items/key.png");
 
-  // Mark (اللاعب)
   const MARK_BASE = AS + "sprites/mark/";
   const mark = {
     idle: {
@@ -104,8 +101,7 @@ export function makeRenderer(canvas) {
     },
   };
 
-  // Guards
-  // ✅ لاحظي: عندك المجلدات Back / Front / left / right (حسب الصورة)
+ 
   const G_BASE = AS + "sprites/guard/";
   const pickFrames = [0, 3, 6, 9, 12, 15, 18, 21, 24, 27];
 

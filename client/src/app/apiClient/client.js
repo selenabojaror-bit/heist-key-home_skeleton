@@ -43,7 +43,6 @@ export function apiLeaderboard(baseUrl, levelId, options) {
 }
 
 export function apiSessionStart(baseUrl, levelId, options) {
-  // ✅ حماية: إذا صار undefined نعرف فورًا من الكونسول بدل ما نرسل request غلط
   if (!levelId) {
     throw new Error("client_bug: apiSessionStart called without levelId");
   }

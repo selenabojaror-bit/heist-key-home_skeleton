@@ -43,21 +43,19 @@ function nextFromId(id) {
   if (next === "L4") return null;
   return next;
 }
-const frameRef = useRef(null);
-const levelRef = useRef(null);
-
-useEffect(() => { frameRef.current = frame; }, [frame]);
-useEffect(() => { levelRef.current = level; }, [level]);
 
 export default function PlayPage() {
   const nav = useNavigate();
   const params = useParams();
 
   const baseUrl = useMemo(() => {
-    const s =
-      localStorage.getItem("heist_backend_url") ||
-      import.meta.env.VITE_API_BASE_URL ||
-      "http://127.0.0.1:4000";
+    const saved = localStorage.getItem("heist_backend_url");
+    const env = import.meta.env.VITE_API_BASE_URL;
+
+    // ✅ على Render (production) الأفضل يكون نفس الدومين (نفس الـorigin)
+    const fallback = import.meta.env.DEV ? "http://127.0.0.1:4000" : window.location.origin;
+
+    const s = saved || env || fallback;
     return normBaseUrl(s);
   }, []);
 
@@ -73,11 +71,22 @@ export default function PlayPage() {
   const [frame, setFrame] = useState(null);
   const [result, setResult] = useState(null);
 
-const [overlay, setOverlay] = useState({
-  open: false,
-  kind: "info", // "win" | "lose" | "info"
-  timeMs: null, // ✅ وقت الفوز (للـ win)
-});
+  // ✅ refs for instant client-side prediction
+  const frameRef = useRef(null);
+  const levelRef = useRef(null);
+
+  useEffect(() => {
+    frameRef.current = frame;
+  }, [frame]);
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
+
+  const [overlay, setOverlay] = useState({
+    open: false,
+    kind: "info", // "win" | "lose" | "info"
+    timeMs: null, // ✅ وقت الفوز (للـ win)
+  });
 
   // ✅ نثبت ال levelId الحالي بحالة (عشان Next يحسب صح)
   const [currentLevelId, setCurrentLevelId] = useState(null);
@@ -176,7 +185,7 @@ const [overlay, setOverlay] = useState({
     setLevelMeta(meta);
     setLevel(data);
 
-    // ✅ هون كان الغلط: لازم نبدأ سيشن على levelId نفسه
+    // ✅ لازم نبدأ سيشن على levelId نفسه
     await startSessionForLevel(levelId);
     startPoll();
   }
@@ -243,15 +252,13 @@ const [overlay, setOverlay] = useState({
       timeMs: typeof serverTimeMs === "number" ? Math.round(serverTimeMs) : null,
     });
 
-    // ✅ كل مرة تربحي ينحفظ Run جديد بالجدول
-    // ✅ من هسا: ما بنبعت وقت من الـClient نهائيًا — بنبعت sessionId وبس
+    // ✅ من هسا: بنخزن Run واحد (أفضل نتيجة بالباك اند لو معموله)
     try {
       await apiSaveRun(baseUrl, {
         levelId: activeLevelIdRef.current,
         playerName,
         sessionId: sessionIdRef.current,
-         timeMs: Math.max(1, Number(out?.result?.timeMs ?? 0)),
-
+        timeMs: Math.max(1, Number(out?.result?.timeMs ?? 0)),
         ticks: out.result.ticks,
         alerts: out.result.alerts,
       });
@@ -267,36 +274,36 @@ const [overlay, setOverlay] = useState({
     stopPoll();
     stopHudTimer();
 
-setOverlay({
-  open: true,
-  kind: "lose",
-  timeMs: null,
-});
+    setOverlay({
+      open: true,
+      kind: "lose",
+      timeMs: null,
+    });
   }
 
   function enqueueMove(mv) {
-  if (endingRef.current) return;
-  if (moveQueueRef.current.length > 8) return;
+    if (endingRef.current) return;
+    if (moveQueueRef.current.length > 8) return;
 
-  const curFrame = frameRef.current;
-  const curLevel = levelRef.current;
+    const curFrame = frameRef.current;
+    const curLevel = levelRef.current;
 
-  // ✅ Prediction: إذا ممنوع (جدار/حدود) لا تحرك ولا تبعت للسيرفر
-  const { nextFrame, ok } = predictMove(curFrame, curLevel, mv);
-  if (!ok) return;
+    // ✅ Prediction: إذا ممنوع (جدار/حدود) لا تحرك ولا تبعت للسيرفر
+    const { nextFrame, ok } = predictMove(curFrame, curLevel, mv);
+    if (!ok) return;
 
-  // ✅ حركة فورية على الشاشة
-  setFrame(nextFrame);
-  frameRef.current = nextFrame;
+    // ✅ حركة فورية على الشاشة
+    setFrame(nextFrame);
+    frameRef.current = nextFrame;
 
-  // ✅ ابعت للسيرفر عشان يصير authoritative (تصحيح/حراس/نتيجة)
-  if (!busyRef.current) {
-    void stepServer(mv);
-    return;
+    // ✅ ابعت للسيرفر عشان يصير authoritative (تصحيح/حراس/نتيجة)
+    if (!busyRef.current) {
+      void stepServer(mv);
+      return;
+    }
+
+    moveQueueRef.current.push(mv);
   }
-
-  moveQueueRef.current.push(mv);
-}
 
   // ✅ تحميل الليفيل يتكرر لما يتغير /play/:levelId
   useEffect(() => {
@@ -352,7 +359,9 @@ setOverlay({
     <div className="playPage">
       <div className="topBar">
         <div className="topLeft">
-          <button className="btn" onClick={() => nav("/levels")}>Back</button>
+          <button className="btn" onClick={() => nav("/levels")}>
+            Back
+          </button>
           <button className="btn" onClick={restartLevel} disabled={!levelMeta}>
             Restart
           </button>
@@ -377,87 +386,87 @@ setOverlay({
 
       <Controls onMove={enqueueMove} />
 
-{overlay.open && (
-  <div className="modalOverlay">
-    <div className="resultArtModal">
-      <img
-        className="resultArtImg"
-        src={
-          overlay.kind === "win"
-            ? "/assets/ui/win-overlay.png"
-            : "/assets/ui/lose-overlay.png"
-        }
-        alt={overlay.kind === "win" ? "Win" : "Lose"}
-        draggable={false}
-      />
-
-      {/* ✅ وقت الفوز تحت YOU WIN */}
-      {overlay.kind === "win" && typeof overlay.timeMs === "number" && (
-        <div className="winTimeText">⏱ {fmtTime(overlay.timeMs)}</div>
-      )}
-
-      {/* ✅ WIN Hotspots */}
-      {overlay.kind === "win" && (
-        <>
-          {/* Back */}
-          <button
-            className="resHotspot winBack"
-            onClick={() => {
-              setOverlay({ open: false, kind: "info", timeMs: null });
-              nav("/levels");
-            }}
-            aria-label="Back"
-            title="Back"
-            type="button"
-          />
-
-          {/* Next (فقط إذا في ليفيل بعده) */}
-          {nextLevelId && (
-            <button
-              className="resHotspot winNext"
-              onClick={() => {
-                setOverlay({ open: false, kind: "info", timeMs: null });
-                nav(`/play/${nextLevelId}`);
-              }}
-              aria-label="Next"
-              title="Next"
-              type="button"
+      {overlay.open && (
+        <div className="modalOverlay">
+          <div className="resultArtModal">
+            <img
+              className="resultArtImg"
+              src={
+                overlay.kind === "win"
+                  ? "/assets/ui/win-overlay.png"
+                  : "/assets/ui/lose-overlay.png"
+              }
+              alt={overlay.kind === "win" ? "Win" : "Lose"}
+              draggable={false}
             />
-          )}
-        </>
-      )}
 
-      {/* ✅ LOSE Hotspots */}
-      {overlay.kind === "lose" && (
-        <>
-          {/* Try Again */}
-          <button
-            className="resHotspot loseTry"
-            onClick={() => {
-              setOverlay({ open: false, kind: "info", timeMs: null });
-              void restartLevel();
-            }}
-            aria-label="Try again"
-            title="Try again"
-            type="button"
-          />
+            {/* ✅ وقت الفوز تحت YOU WIN */}
+            {overlay.kind === "win" && typeof overlay.timeMs === "number" && (
+              <div className="winTimeText">⏱ {fmtTime(overlay.timeMs)}</div>
+            )}
 
-          {/* Back */}
-          <button
-            className="resHotspot loseBack"
-            onClick={() => {
-              setOverlay({ open: false, kind: "info", timeMs: null });
-              nav("/levels");
-            }}
-            aria-label="Back"
-            title="Back"
-            type="button"
-          />
-        </>
+            {/* ✅ WIN Hotspots */}
+            {overlay.kind === "win" && (
+              <>
+                {/* Back */}
+                <button
+                  className="resHotspot winBack"
+                  onClick={() => {
+                    setOverlay({ open: false, kind: "info", timeMs: null });
+                    nav("/levels");
+                  }}
+                  aria-label="Back"
+                  title="Back"
+                  type="button"
+                />
+
+                {/* Next (فقط إذا في ليفيل بعده) */}
+                {nextLevelId && (
+                  <button
+                    className="resHotspot winNext"
+                    onClick={() => {
+                      setOverlay({ open: false, kind: "info", timeMs: null });
+                      nav(`/play/${nextLevelId}`);
+                    }}
+                    aria-label="Next"
+                    title="Next"
+                    type="button"
+                  />
+                )}
+              </>
+            )}
+
+            {/* ✅ LOSE Hotspots */}
+            {overlay.kind === "lose" && (
+              <>
+                {/* Try Again */}
+                <button
+                  className="resHotspot loseTry"
+                  onClick={() => {
+                    setOverlay({ open: false, kind: "info", timeMs: null });
+                    void restartLevel();
+                  }}
+                  aria-label="Try again"
+                  title="Try again"
+                  type="button"
+                />
+
+                {/* Back */}
+                <button
+                  className="resHotspot loseBack"
+                  onClick={() => {
+                    setOverlay({ open: false, kind: "info", timeMs: null });
+                    nav("/levels");
+                  }}
+                  aria-label="Back"
+                  title="Back"
+                  type="button"
+                />
+              </>
+            )}
+          </div>
+        </div>
       )}
-    </div>
-  </div>
-)}
     </div>
   );
 }

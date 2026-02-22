@@ -34,11 +34,15 @@ function getSavedPlayerName() {
 export default function LevelsPage() {
   const nav = useNavigate();
 
-const [backendUrl, setBackendUrl] = useState(
-  localStorage.getItem(LS_BACKEND) ||
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:4000"
-);
+const [backendUrl, setBackendUrl] = useState(() => {
+  const saved = localStorage.getItem(LS_BACKEND);
+  const env = import.meta.env.VITE_API_BASE_URL;
+
+  // ✅ على Render (production) الأفضل يكون نفس الدومين (نفس الـorigin)
+  const fallback = import.meta.env.DEV ? "http://127.0.0.1:4000" : window.location.origin;
+
+  return saved || env || fallback;
+});
 
   // (topBar مخفي أصلاً)
   const [playerName, setPlayerName] = useState(
