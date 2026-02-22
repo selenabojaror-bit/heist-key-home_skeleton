@@ -1,23 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { predictMove } from "../../game/predict/predictMove";
 
-import {
-  apiGetLevels,
-  apiGetLevel,
-  apiSaveRun,
-  apiSessionStart,
-  apiSessionStep,
-  normBaseUrl,
-} from "../../app/apiClient/client";
+import { predictMove } from "../../game/predict/predictMove";
+import { apiGetLevels, apiGetLevel, apiSaveRun, normBaseUrl } from "../../app/apiClient/client";
 
 import GameCanvas from "../../components/Grid/GameCanvas";
 import HUD from "../../components/HUD/HUD";
 import Controls from "../../components/Controls/Controls";
 import "./PlayPage.css";
 
-// ✅ polling للحارس/التحديثات (بدون ضغط على الشبكة)
-const POLL_MS = 200;
+// سرعة حركة الحراس (كل ما قلّي الرقم = أسرع)
+const GUARD_TICK_MS = 180;
 
 function fmtTime(ms) {
   const total = Math.max(0, ms);
@@ -34,13 +27,11 @@ function getQueryLevelId() {
 }
 
 function nextFromId(id) {
-  // يدعم L1/L2/L3
   const m = String(id || "").match(/^L(\d+)$/i);
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;
   const next = `L${n + 1}`;
-  // ✅ آخر ليفيل عندك L3 → ما في Next
   if (next === "L4") return null;
   return next;
 }
@@ -53,8 +44,7 @@ export default function PlayPage() {
     const saved = localStorage.getItem("heist_backend_url");
     const env = import.meta.env.VITE_API_BASE_URL;
     const fallback = import.meta.env.DEV ? "http://127.0.0.1:4000" : window.location.origin;
-    const s = saved || env || fallback;
-    return normBaseUrl(s);
+    return normBaseUrl(saved || env || fallback);
   }, []);
 
   const playerName = useMemo(
@@ -66,51 +56,36 @@ export default function PlayPage() {
   const [levelMeta, setLevelMeta] = useState(null);
   const [level, setLevel] = useState(null);
 
+  // frame اللي GameCanvas برسمه
   const [frame, setFrame] = useState(null);
-  const [result, setResult] = useState(null);
 
-  // ✅ refs for instant prediction + reconciliation
-  const frameRef = useRef(null);
+  // نتيحة HUD (محلي)
+  const [result, setResult] = useState({ ticks: 0, score: 0, alerts: 0 });
+
+  // refs
   const levelRef = useRef(null);
-
-  // ✅ moves pressed locally but not yet confirmed by server
-  const pendingRef = useRef([]);
-
-  useEffect(() => {
-    frameRef.current = frame;
-  }, [frame]);
-  useEffect(() => {
-    levelRef.current = level;
-  }, [level]);
-
-  const [overlay, setOverlay] = useState({
-    open: false,
-    kind: "info", // "win" | "lose" | "info"
-    timeMs: null,
-  });
-
-  const [currentLevelId, setCurrentLevelId] = useState(null);
-
-  // session + network control
-  const sessionIdRef = useRef(null);
-  const activeLevelIdRef = useRef(null);
-  const abortRef = useRef(null);
-  const busyRef = useRef(false);
-  const endingRef = useRef(false);
-
-  // polling + queue
-  const pollTimerRef = useRef(null);
-  const moveQueueRef = useRef([]);
-
-  // HUD timer (display only)
+  const frameRef = useRef(null);
   const startPerfRef = useRef(0);
   const hudTimerRef = useRef(null);
+  const guardTimerRef = useRef(null);
+
   const [timeText, setTimeText] = useState("00:00.0");
+
+  const [overlay, setOverlay] = useState({ open: false, kind: "info", timeMs: null });
+  const [currentLevelId, setCurrentLevelId] = useState(null);
 
   const nextLevelId = useMemo(
     () => nextFromId(currentLevelId || levelMeta?.id),
     [currentLevelId, levelMeta?.id]
   );
+
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
+
+  useEffect(() => {
+    frameRef.current = frame;
+  }, [frame]);
 
   function stopHudTimer() {
     if (hudTimerRef.current) clearInterval(hudTimerRef.current);
@@ -127,216 +102,183 @@ export default function PlayPage() {
     }, 100);
   }
 
-  function cancelInFlight() {
-    if (abortRef.current) abortRef.current.abort();
-    abortRef.current = null;
+  function stopGuardTimer() {
+    if (guardTimerRef.current) clearInterval(guardTimerRef.current);
+    guardTimerRef.current = null;
   }
 
-  function stopPoll() {
-    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    pollTimerRef.current = null;
+  function makeInitialFrame(lvl) {
+    const start = lvl?.start ?? { x: 0, y: (lvl?.size?.h ?? 15) - 1 };
+
+    // نخزّن مسارات الحراس داخليًا داخل عنصر guard نفسه
+    const guards = (lvl?.guards || []).map((g) => ({
+      x: Number(g.x),
+      y: Number(g.y),
+      visionRange: Number(g.visionRange ?? 4),
+      __path: Array.isArray(g.path) ? g.path.map((p) => ({ x: Number(p.x), y: Number(p.y) })) : [],
+      __i: 0,
+    }));
+
+    return {
+      player: { x: Number(start.x), y: Number(start.y), hasKey: false },
+      guards,
+      cameras: lvl?.cameras || [],
+    };
   }
 
-  function startPoll() {
-    stopPoll();
-    pollTimerRef.current = setInterval(() => {
-      if (endingRef.current) return;
-      if (moveQueueRef.current.length) return;
-      if (busyRef.current) return;
-      void stepServer(null); // تحديثات الحارس/النتيجة
-    }, POLL_MS);
+  function isLoseNow(f) {
+    const px = f?.player?.x;
+    const py = f?.player?.y;
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return false;
+    const guards = Array.isArray(f?.guards) ? f.guards : [];
+    return guards.some((g) => Number(g.x) === px && Number(g.y) === py);
   }
 
-  async function startSessionForLevel(levelId) {
-    activeLevelIdRef.current = levelId;
-    setCurrentLevelId(levelId);
+  function isWinNow(f, lvl) {
+    if (!lvl?.home) return false;
+    const px = f?.player?.x;
+    const py = f?.player?.y;
+    if (px !== lvl.home.x || py !== lvl.home.y) return false;
+    const keyRequired = !!(lvl?.rules?.keyRequired ?? true);
+    return !keyRequired || !!f?.player?.hasKey;
+  }
 
-    endingRef.current = false;
-    busyRef.current = false;
-    moveQueueRef.current = [];
-    pendingRef.current = [];
+  function updateScore(ticks, ms) {
+    // سكور بسيط: أقل وقت وأقل خطوات أحسن
+    const timeScore = Math.max(0, 300000 - ms); // 5 دقائق سقف
+    const stepScore = Math.max(0, 5000 - ticks * 20);
+    return Math.floor(timeScore / 100 + stepScore / 10);
+  }
 
-    cancelInFlight();
-    const start = await apiSessionStart(baseUrl, levelId);
+  function startGuardsLoop() {
+    stopGuardTimer();
 
-    sessionIdRef.current = start.sessionId;
+    guardTimerRef.current = setInterval(() => {
+      const lvl = levelRef.current;
+      const cur = frameRef.current;
+      if (!lvl || !cur || overlay.open) return;
 
-    setFrame(start.frame);
-    frameRef.current = start.frame;
+      const guards = Array.isArray(cur.guards) ? cur.guards : [];
+      let changed = false;
 
-    setResult(start.result);
+      const nextGuards = guards.map((g) => {
+        const path = Array.isArray(g.__path) ? g.__path : [];
+        if (path.length < 2) return g;
 
-    startHudTimer();
+        const nextI = (Number(g.__i || 0) + 1) % path.length;
+        const pos = path[nextI];
+
+        changed = true;
+        return { ...g, x: pos.x, y: pos.y, __i: nextI };
+      });
+
+      if (!changed) return;
+
+      const nextFrame = { ...cur, guards: nextGuards };
+      setFrame(nextFrame);
+      frameRef.current = nextFrame;
+
+      // lose check بسبب الحارس
+      if (isLoseNow(nextFrame)) {
+        setOverlay({ open: true, kind: "lose", timeMs: null });
+        stopGuardTimer();
+        stopHudTimer();
+      }
+    }, GUARD_TICK_MS);
   }
 
   async function loadLevel(levelId) {
-    activeLevelIdRef.current = levelId;
-    setCurrentLevelId(levelId);
-
-    stopPoll();
+    stopGuardTimer();
     stopHudTimer();
-    cancelInFlight();
+    setOverlay({ open: false, kind: "info", timeMs: null });
 
-    moveQueueRef.current = [];
-    pendingRef.current = [];
+    setCurrentLevelId(levelId);
 
     const meta = await apiGetLevel(baseUrl, levelId);
     meta.id = meta.id ?? levelId;
 
     const data = meta.data || meta.level;
-
     setLevelMeta(meta);
     setLevel(data);
-    levelRef.current = data;
 
-    await startSessionForLevel(levelId);
-    startPoll();
+    const initFrame = makeInitialFrame(data);
+    setFrame(initFrame);
+    frameRef.current = initFrame;
+
+    setResult({ ticks: 0, score: 0, alerts: 0 });
+    startHudTimer();
+    startGuardsLoop();
   }
 
   async function restartLevel() {
-    const id = activeLevelIdRef.current || currentLevelId || levelMeta?.id || "L1";
+    const id = currentLevelId || levelMeta?.id || "L1";
     await loadLevel(id);
   }
 
-  async function stepServer(move) {
-    if (!sessionIdRef.current) return;
-    if (busyRef.current) return;
-    if (endingRef.current) return;
+  function finishWin() {
+    const ms = performance.now() - startPerfRef.current;
+    const timeMs = Math.max(1, Math.round(ms));
+    setOverlay({ open: true, kind: "win", timeMs });
 
-    busyRef.current = true;
-
-    cancelInFlight();
-    abortRef.current = new AbortController();
-
-    try {
-      const out = await apiSessionStep(
-        baseUrl,
-        sessionIdRef.current,
-        move ?? undefined,
-        { signal: abortRef.current.signal }
-      );
-
-      // ✅ 1) السيرفر مصدر الحقيقة
-      let base = out.frame;
-
-      // ✅ 2) إذا هذا الرد نتيجة move، شيل أول pending (لو مطابق)
-      if (move && pendingRef.current.length && pendingRef.current[0] === move) {
-        pendingRef.current.shift();
-      }
-
-      // ✅ 3) Reconciliation: طبّق باقي pending فوق فريم السيرفر
-      const lv = levelRef.current;
-      if (lv && pendingRef.current.length) {
-        let f = base;
-        const still = [];
-
-        for (const mv2 of pendingRef.current) {
-          const r = predictMove(f, lv, mv2);
-          if (!r.ok) break; // إذا صار اختلاف، وقف
-          f = r.nextFrame;
-          still.push(mv2);
-        }
-
-        base = f;
-        pendingRef.current = still;
-      }
-
-      setFrame(base);
-      frameRef.current = base;
-
-      setResult(out.result);
-
-      if (out?.result?.lose) {
-        await handleLose();
-        return;
-      }
-
-      if (out?.result?.win) {
-        await handleWin(out);
-        return;
-      }
-    } catch (e) {
-      if (e?.name !== "AbortError") console.warn("step failed:", e);
-    } finally {
-      busyRef.current = false;
-
-      if (moveQueueRef.current.length && !endingRef.current) {
-        const next = moveQueueRef.current.shift();
-        if (next) void stepServer(next);
-      }
-    }
-  }
-
-  async function handleWin(out) {
-    if (endingRef.current) return;
-    endingRef.current = true;
-
-    stopPoll();
+    stopGuardTimer();
     stopHudTimer();
 
-    const serverTimeMs = out?.result?.timeMs;
-
-    setOverlay({
-      open: true,
-      kind: "win",
-      timeMs: typeof serverTimeMs === "number" ? Math.round(serverTimeMs) : null,
-    });
-
-    try {
-      await apiSaveRun(baseUrl, {
-        levelId: activeLevelIdRef.current,
-        playerName,
-        sessionId: sessionIdRef.current,
-        timeMs: Math.max(1, Number(out?.result?.timeMs ?? 0)),
-        ticks: out?.result?.ticks,
-        alerts: out?.result?.alerts,
-      });
-    } catch (e) {
-      console.warn("save run failed:", e);
-    }
-  }
-
-  async function handleLose() {
-    if (endingRef.current) return;
-    endingRef.current = true;
-
-    stopPoll();
-    stopHudTimer();
-
-    setOverlay({
-      open: true,
-      kind: "lose",
-      timeMs: null,
-    });
+    // حفظ سكور (اختياري)
+    void (async () => {
+      try {
+        await apiSaveRun(baseUrl, {
+          levelId: currentLevelId || levelMeta?.id,
+          playerName,
+          sessionId: "client-only",
+          timeMs,
+          ticks: result.ticks,
+          alerts: 0,
+        });
+      } catch (e) {
+        console.warn("save run failed:", e);
+      }
+    })();
   }
 
   function enqueueMove(mv) {
-    if (endingRef.current) return;
-    if (moveQueueRef.current.length > 8) return;
+    if (overlay.open) return;
 
-    const curFrame = frameRef.current;
-    const curLevel = levelRef.current;
-    if (!curFrame || !curLevel) return;
+    const lvl = levelRef.current;
+    const cur = frameRef.current;
+    if (!lvl || !cur) return;
 
-    // ✅ Prediction: لو ممنوع (جدار/حدود) ما تتحركي أصلاً
-    const { nextFrame, ok } = predictMove(curFrame, curLevel, mv);
-    if (!ok) return;
+    // ✅ بدك تزيد steps حتى لو ضرب جدار؟ هيك:
+    const nextTicks = Number(result.ticks || 0) + 1;
 
-    // ✅ حركة فورية على الشاشة
+    // prediction محلي
+    const r = predictMove(cur, lvl, mv);
+
+    // إذا blocked: ما تحركي اللاعب، بس زيدي ticks
+    const nextFrame = r.ok ? r.nextFrame : cur;
+
+    // تحديث محلي فوري
     setFrame(nextFrame);
     frameRef.current = nextFrame;
 
-    // ✅ pending للحفاظ على السلاسة (reconciliation)
-    pendingRef.current.push(mv);
+    const ms = performance.now() - startPerfRef.current;
+    const score = updateScore(nextTicks, ms);
+    setResult((prev) => ({ ...prev, ticks: nextTicks, score }));
 
-    // ✅ ابعت للسيرفر
-    if (!busyRef.current) {
-      void stepServer(mv);
+    // key pickup موجود جوّا predictMove (hasKey)
+    // lose / win checks
+    if (isLoseNow(nextFrame)) {
+      setOverlay({ open: true, kind: "lose", timeMs: null });
+      stopGuardTimer();
+      stopHudTimer();
       return;
     }
-    moveQueueRef.current.push(mv);
+
+    if (isWinNow(nextFrame, lvl)) {
+      finishWin();
+    }
   }
 
+  // init
   useEffect(() => {
     let alive = true;
 
@@ -355,9 +297,8 @@ export default function PlayPage() {
 
     return () => {
       alive = false;
-      stopPoll();
+      stopGuardTimer();
       stopHudTimer();
-      cancelInFlight();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.levelId]);
@@ -365,7 +306,7 @@ export default function PlayPage() {
   // keyboard
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (endingRef.current) return;
+      if (overlay.open) return;
 
       const keysToBlock = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "];
       if (keysToBlock.includes(e.key)) e.preventDefault();
@@ -382,7 +323,7 @@ export default function PlayPage() {
 
     window.addEventListener("keydown", onKeyDown, { passive: false });
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [overlay.open, result.ticks]);
 
   const title = levelMeta ? `${levelMeta.id} — ${levelMeta.name}` : "Loading...";
 
@@ -390,12 +331,8 @@ export default function PlayPage() {
     <div className="playPage">
       <div className="topBar">
         <div className="topLeft">
-          <button className="btn" onClick={() => nav("/levels")}>
-            Back
-          </button>
-          <button className="btn" onClick={restartLevel} disabled={!levelMeta}>
-            Restart
-          </button>
+          <button className="btn" onClick={() => nav("/levels")}>Back</button>
+          <button className="btn" onClick={restartLevel} disabled={!levelMeta}>Restart</button>
         </div>
 
         <div className="timeCenter">⏱ {timeText}</div>
@@ -435,22 +372,15 @@ export default function PlayPage() {
               <>
                 <button
                   className="resHotspot winBack"
-                  onClick={() => {
-                    setOverlay({ open: false, kind: "info", timeMs: null });
-                    nav("/levels");
-                  }}
+                  onClick={() => { setOverlay({ open: false, kind: "info", timeMs: null }); nav("/levels"); }}
                   aria-label="Back"
                   title="Back"
                   type="button"
                 />
-
                 {nextLevelId && (
                   <button
                     className="resHotspot winNext"
-                    onClick={() => {
-                      setOverlay({ open: false, kind: "info", timeMs: null });
-                      nav(`/play/${nextLevelId}`);
-                    }}
+                    onClick={() => { setOverlay({ open: false, kind: "info", timeMs: null }); nav(`/play/${nextLevelId}`); }}
                     aria-label="Next"
                     title="Next"
                     type="button"
@@ -463,21 +393,14 @@ export default function PlayPage() {
               <>
                 <button
                   className="resHotspot loseTry"
-                  onClick={() => {
-                    setOverlay({ open: false, kind: "info", timeMs: null });
-                    void restartLevel();
-                  }}
+                  onClick={() => { setOverlay({ open: false, kind: "info", timeMs: null }); void restartLevel(); }}
                   aria-label="Try again"
                   title="Try again"
                   type="button"
                 />
-
                 <button
                   className="resHotspot loseBack"
-                  onClick={() => {
-                    setOverlay({ open: false, kind: "info", timeMs: null });
-                    nav("/levels");
-                  }}
+                  onClick={() => { setOverlay({ open: false, kind: "info", timeMs: null }); nav("/levels"); }}
                   aria-label="Back"
                   title="Back"
                   type="button"
