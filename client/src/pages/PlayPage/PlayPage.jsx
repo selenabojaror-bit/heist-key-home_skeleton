@@ -16,7 +16,8 @@ import HUD from "../../components/HUD/HUD";
 import Controls from "../../components/Controls/Controls";
 import "./PlayPage.css";
 
-const POLL_MS = 300;
+// ✅ polling للحارس/التحديثات (بدون ضغط على الشبكة)
+const POLL_MS = 200;
 
 function fmtTime(ms) {
   const total = Math.max(0, ms);
@@ -51,10 +52,7 @@ export default function PlayPage() {
   const baseUrl = useMemo(() => {
     const saved = localStorage.getItem("heist_backend_url");
     const env = import.meta.env.VITE_API_BASE_URL;
-
-    // ✅ على Render (production) الأفضل يكون نفس الدومين (نفس الـorigin)
     const fallback = import.meta.env.DEV ? "http://127.0.0.1:4000" : window.location.origin;
-
     const s = saved || env || fallback;
     return normBaseUrl(s);
   }, []);
@@ -71,11 +69,12 @@ export default function PlayPage() {
   const [frame, setFrame] = useState(null);
   const [result, setResult] = useState(null);
 
-  // ✅ refs for instant client-side prediction
+  // ✅ refs for instant prediction + reconciliation
   const frameRef = useRef(null);
   const levelRef = useRef(null);
-  const localTicksRef = useRef(0);
-const [localTicks, setLocalTicks] = useState(0);
+
+  // ✅ moves pressed locally but not yet confirmed by server
+  const pendingRef = useRef([]);
 
   useEffect(() => {
     frameRef.current = frame;
@@ -87,10 +86,9 @@ const [localTicks, setLocalTicks] = useState(0);
   const [overlay, setOverlay] = useState({
     open: false,
     kind: "info", // "win" | "lose" | "info"
-    timeMs: null, // ✅ وقت الفوز (للـ win)
+    timeMs: null,
   });
 
-  // ✅ نثبت ال levelId الحالي بحالة (عشان Next يحسب صح)
   const [currentLevelId, setCurrentLevelId] = useState(null);
 
   // session + network control
@@ -145,54 +143,52 @@ const [localTicks, setLocalTicks] = useState(0);
       if (endingRef.current) return;
       if (moveQueueRef.current.length) return;
       if (busyRef.current) return;
-      void stepServer(null);
+      void stepServer(null); // تحديثات الحارس/النتيجة
     }, POLL_MS);
   }
 
   async function startSessionForLevel(levelId) {
-    // ✅ مهم: ثبّت ال levelId هنا فورًا
     activeLevelIdRef.current = levelId;
     setCurrentLevelId(levelId);
 
-    // ✅ رجّع الحالة للوضع الطبيعي
     endingRef.current = false;
     busyRef.current = false;
     moveQueueRef.current = [];
+    pendingRef.current = [];
 
     cancelInFlight();
     const start = await apiSessionStart(baseUrl, levelId);
-    sessionIdRef.current = start.sessionId;
-setFrame(start.frame);
-frameRef.current = start.frame;
-setResult(start.result);
 
-const t = Number(start?.result?.ticks ?? 0);
-localTicksRef.current = t;
-setLocalTicks(t);
+    sessionIdRef.current = start.sessionId;
+
+    setFrame(start.frame);
+    frameRef.current = start.frame;
+
+    setResult(start.result);
+
     startHudTimer();
   }
 
   async function loadLevel(levelId) {
-    // ✅ أهم سطر: ثبّت levelId قبل أي اشي
     activeLevelIdRef.current = levelId;
     setCurrentLevelId(levelId);
 
-    // تنظيف قبل تحميل ليفيل جديد
     stopPoll();
     stopHudTimer();
     cancelInFlight();
 
-    const meta = await apiGetLevel(baseUrl, levelId);
+    moveQueueRef.current = [];
+    pendingRef.current = [];
 
-    // ✅ ضمان: لو السيرفر ما رجع meta.id نخليه هو levelId
+    const meta = await apiGetLevel(baseUrl, levelId);
     meta.id = meta.id ?? levelId;
 
     const data = meta.data || meta.level;
 
     setLevelMeta(meta);
     setLevel(data);
+    levelRef.current = data;
 
-    // ✅ لازم نبدأ سيشن على levelId نفسه
     await startSessionForLevel(levelId);
     startPoll();
   }
@@ -220,35 +216,35 @@ setLocalTicks(t);
         { signal: abortRef.current.signal }
       );
 
-      // 1) result (win/lose/score/ticks) من السيرفر
+      // ✅ 1) السيرفر مصدر الحقيقة
+      let base = out.frame;
+
+      // ✅ 2) إذا هذا الرد نتيجة move، شيل أول pending (لو مطابق)
+      if (move && pendingRef.current.length && pendingRef.current[0] === move) {
+        pendingRef.current.shift();
+      }
+
+      // ✅ 3) Reconciliation: طبّق باقي pending فوق فريم السيرفر
+      const lv = levelRef.current;
+      if (lv && pendingRef.current.length) {
+        let f = base;
+        const still = [];
+
+        for (const mv2 of pendingRef.current) {
+          const r = predictMove(f, lv, mv2);
+          if (!r.ok) break; // إذا صار اختلاف، وقف
+          f = r.nextFrame;
+          still.push(mv2);
+        }
+
+        base = f;
+        pendingRef.current = still;
+      }
+
+      setFrame(base);
+      frameRef.current = base;
+
       setResult(out.result);
-
-      // 2) ticks ما ينقصش
-      const serverTicks = Number(out?.result?.ticks ?? 0);
-      if (Number.isFinite(serverTicks) && serverTicks > localTicksRef.current) {
-        localTicksRef.current = serverTicks;
-        setLocalTicks(serverTicks);
-      }
-
-      // 3) ✅ أهم سطرين: خدي فريم السيرفر للحراس + خلي اللاعب من الكلاينت
-      const clientPlayer = frameRef.current?.player;
-      let mergedFrame = out.frame;
-
-      if (mergedFrame && clientPlayer) {
-        mergedFrame = {
-          ...mergedFrame,
-          player: {
-            ...mergedFrame.player,
-            x: clientPlayer.x,
-            y: clientPlayer.y,
-            // ✅ ما تخليها ترجع false بالغلط
-            hasKey: !!mergedFrame.player?.hasKey || !!clientPlayer.hasKey,
-          },
-        };
-      }
-
-      setFrame(mergedFrame);
-      frameRef.current = mergedFrame;
 
       if (out?.result?.lose) {
         await handleLose();
@@ -286,14 +282,14 @@ setLocalTicks(t);
       timeMs: typeof serverTimeMs === "number" ? Math.round(serverTimeMs) : null,
     });
 
-    // ✅ من هسا: بنخزن Run واحد (أفضل نتيجة بالباك اند لو معموله)
     try {
       await apiSaveRun(baseUrl, {
         levelId: activeLevelIdRef.current,
         playerName,
         sessionId: sessionIdRef.current,
         timeMs: Math.max(1, Number(out?.result?.timeMs ?? 0)),
-ticks: Math.max(Number(out?.result?.ticks ?? 0), localTicksRef.current),        alerts: out.result.alerts,
+        ticks: out?.result?.ticks,
+        alerts: out?.result?.alerts,
       });
     } catch (e) {
       console.warn("save run failed:", e);
@@ -314,36 +310,33 @@ ticks: Math.max(Number(out?.result?.ticks ?? 0), localTicksRef.current),        
     });
   }
 
- function enqueueMove(mv) {
-  if (endingRef.current) return;
-  if (moveQueueRef.current.length > 8) return;
+  function enqueueMove(mv) {
+    if (endingRef.current) return;
+    if (moveQueueRef.current.length > 8) return;
 
-  const curFrame = frameRef.current;
-  const curLevel = levelRef.current;
-  if (!curFrame || !curLevel) return;
+    const curFrame = frameRef.current;
+    const curLevel = levelRef.current;
+    if (!curFrame || !curLevel) return;
 
-  // ✅ Prediction فوري + تحسب خطوة حتى لو blocked
-  const { nextFrame, consume } = predictMove(curFrame, curLevel, mv, { alwaysConsume: true });
+    // ✅ Prediction: لو ممنوع (جدار/حدود) ما تتحركي أصلاً
+    const { nextFrame, ok } = predictMove(curFrame, curLevel, mv);
+    if (!ok) return;
 
-  if (consume) {
-    localTicksRef.current += 1;
-    setLocalTicks(localTicksRef.current);
+    // ✅ حركة فورية على الشاشة
+    setFrame(nextFrame);
+    frameRef.current = nextFrame;
+
+    // ✅ pending للحفاظ على السلاسة (reconciliation)
+    pendingRef.current.push(mv);
+
+    // ✅ ابعت للسيرفر
+    if (!busyRef.current) {
+      void stepServer(mv);
+      return;
+    }
+    moveQueueRef.current.push(mv);
   }
 
-  // ✅ تحديث فوري للشاشة (لو blocked رح يضل نفس المكان)
-  setFrame(nextFrame);
-  frameRef.current = nextFrame;
-
-  // ✅ ابعتي للسيرفر بس للمنطق (حراس/lose/win/حفظ)
-  if (!busyRef.current) {
-    void stepServer(mv);
-    return;
-  }
-
-  moveQueueRef.current.push(mv);
-}
-
-  // ✅ تحميل الليفيل يتكرر لما يتغير /play/:levelId
   useEffect(() => {
     let alive = true;
 
@@ -411,7 +404,8 @@ ticks: Math.max(Number(out?.result?.ticks ?? 0), localTicksRef.current),        
           <HUD
             title={title}
             timeText={timeText}
-ticks={Math.max(Number(result?.ticks ?? 0), localTicks)}            score={result?.score}
+            ticks={result?.ticks}
+            score={result?.score}
             hasKey={frame?.player?.hasKey}
           />
         </div>
@@ -428,24 +422,17 @@ ticks={Math.max(Number(result?.ticks ?? 0), localTicks)}            score={resul
           <div className="resultArtModal">
             <img
               className="resultArtImg"
-              src={
-                overlay.kind === "win"
-                  ? "/assets/ui/win-overlay.png"
-                  : "/assets/ui/lose-overlay.png"
-              }
+              src={overlay.kind === "win" ? "/assets/ui/win-overlay.png" : "/assets/ui/lose-overlay.png"}
               alt={overlay.kind === "win" ? "Win" : "Lose"}
               draggable={false}
             />
 
-            {/* ✅ وقت الفوز تحت YOU WIN */}
             {overlay.kind === "win" && typeof overlay.timeMs === "number" && (
               <div className="winTimeText">⏱ {fmtTime(overlay.timeMs)}</div>
             )}
 
-            {/* ✅ WIN Hotspots */}
             {overlay.kind === "win" && (
               <>
-                {/* Back */}
                 <button
                   className="resHotspot winBack"
                   onClick={() => {
@@ -457,7 +444,6 @@ ticks={Math.max(Number(result?.ticks ?? 0), localTicks)}            score={resul
                   type="button"
                 />
 
-                {/* Next (فقط إذا في ليفيل بعده) */}
                 {nextLevelId && (
                   <button
                     className="resHotspot winNext"
@@ -473,10 +459,8 @@ ticks={Math.max(Number(result?.ticks ?? 0), localTicks)}            score={resul
               </>
             )}
 
-            {/* ✅ LOSE Hotspots */}
             {overlay.kind === "lose" && (
               <>
-                {/* Try Again */}
                 <button
                   className="resHotspot loseTry"
                   onClick={() => {
@@ -488,7 +472,6 @@ ticks={Math.max(Number(result?.ticks ?? 0), localTicks)}            score={resul
                   type="button"
                 />
 
-                {/* Back */}
                 <button
                   className="resHotspot loseBack"
                   onClick={() => {

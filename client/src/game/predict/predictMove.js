@@ -1,3 +1,5 @@
+// client/src/game/predict/predictMove.js
+
 const cache = new WeakMap();
 
 function getIndex(level) {
@@ -24,9 +26,11 @@ function getIndex(level) {
 function inside(idx, x, y) {
   return x >= 0 && y >= 0 && x < idx.w && y < idx.h;
 }
+
 function isWall(idx, x, y) {
   return idx.walls.has(`${x},${y}`);
 }
+
 function delta(mv) {
   if (mv === "U") return { dx: 0, dy: -1 };
   if (mv === "D") return { dx: 0, dy: 1 };
@@ -35,42 +39,34 @@ function delta(mv) {
   return { dx: 0, dy: 0 };
 }
 
-/**
- * ✅ مهم:
- * - alwaysConsume=true: أي كبسة تتحسب "خطوة" حتى لو اصطدم بجدار/حدود/بيت بدون مفتاح
- * return: { nextFrame, consume, moved }
- */
-export function predictMove(frame, level, mv, { alwaysConsume = true } = {}) {
+export function predictMove(frame, level, mv) {
   const idx = getIndex(level);
-  if (!idx || !frame?.player || !mv) {
-    return { nextFrame: frame, consume: false, moved: false };
-  }
+  if (!idx || !frame?.player || !mv) return { nextFrame: frame, ok: false };
 
   const { dx, dy } = delta(mv);
-  if (!dx && !dy) return { nextFrame: frame, consume: false, moved: false };
+  if (!dx && !dy) return { nextFrame: frame, ok: true };
 
   const px = Number(frame.player.x);
   const py = Number(frame.player.y);
   const nx = px + dx;
   const ny = py + dy;
 
+  if (!inside(idx, nx, ny)) return { nextFrame: frame, ok: false };
+  if (isWall(idx, nx, ny)) return { nextFrame: frame, ok: false };
+
   const hasKeyNow = !!frame.player.hasKey;
 
-  // ممنوعات الحركة (بس still consume إذا alwaysConsume)
-  const blocked =
-    !inside(idx, nx, ny) ||
-    isWall(idx, nx, ny) ||
-    (idx.home &&
-      nx === idx.home.x &&
-      ny === idx.home.y &&
-      idx.keyRequired &&
-      !hasKeyNow);
-
-  if (blocked) {
-    return { nextFrame: frame, consume: !!alwaysConsume, moved: false };
+  // ممنوع تفوت البيت بدون مفتاح إذا مطلوب
+  if (
+    idx.home &&
+    nx === idx.home.x &&
+    ny === idx.home.y &&
+    idx.keyRequired &&
+    !hasKeyNow
+  ) {
+    return { nextFrame: frame, ok: false };
   }
 
-  // ✅ حركة فورية (clone خفيف)
   const nextHasKey = hasKeyNow || (idx.key && nx === idx.key.x && ny === idx.key.y);
 
   const nextFrame = {
@@ -78,5 +74,5 @@ export function predictMove(frame, level, mv, { alwaysConsume = true } = {}) {
     player: { ...frame.player, x: nx, y: ny, hasKey: nextHasKey },
   };
 
-  return { nextFrame, consume: true, moved: true };
+  return { nextFrame, ok: true };
 }
