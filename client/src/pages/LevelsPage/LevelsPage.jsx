@@ -34,9 +34,11 @@ function getSavedPlayerName() {
 export default function LevelsPage() {
   const nav = useNavigate();
 
-  const [backendUrl, setBackendUrl] = useState(
-    localStorage.getItem(LS_BACKEND) || "http://127.0.0.1:4000"
-  );
+const [backendUrl, setBackendUrl] = useState(
+  localStorage.getItem(LS_BACKEND) ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://127.0.0.1:4000"
+);
 
   // (topBar مخفي أصلاً)
   const [playerName, setPlayerName] = useState(

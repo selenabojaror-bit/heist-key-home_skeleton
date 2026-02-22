@@ -28,11 +28,17 @@ export async function postRun(req, res, next) {
           const { timeMs, timeSec } = sessionSvc.getElapsed(String(payload.sessionId));
           payload.timeMs = timeMs;
           payload.timeSec = timeSec;
-        } catch (e) {
-          const err = new Error("sessionId_invalid");
-          err.status = 400;
-          throw err;
-        }
+       } catch (e) {
+  // لو وصلنا timeMs من الكلاينت كـ fallback، ما نوقف الحفظ
+  const t = Number(payload.timeMs);
+  if (Number.isFinite(t) && t > 0) {
+    // تجاهلي sessionId وخلي saveRun يكمل
+  } else {
+    const err = new Error("sessionId_invalid");
+    err.status = 400;
+    throw err;
+  }
+}
       }
     }
 

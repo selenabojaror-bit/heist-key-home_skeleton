@@ -242,6 +242,8 @@ const [overlay, setOverlay] = useState({
         levelId: activeLevelIdRef.current,
         playerName,
         sessionId: sessionIdRef.current,
+         timeMs: Math.max(1, Number(out?.result?.timeMs ?? 0)),
+
         ticks: out.result.ticks,
         alerts: out.result.alerts,
       });
