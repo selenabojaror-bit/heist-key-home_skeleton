@@ -16,7 +16,7 @@ import HUD from "../../components/HUD/HUD";
 import Controls from "../../components/Controls/Controls";
 import "./PlayPage.css";
 
-const POLL_MS = 120;
+const POLL_MS = 300;
 
 function fmtTime(ms) {
   const total = Math.max(0, ms);
@@ -74,6 +74,8 @@ export default function PlayPage() {
   // ✅ refs for instant client-side prediction
   const frameRef = useRef(null);
   const levelRef = useRef(null);
+  const localTicksRef = useRef(0);
+const [localTicks, setLocalTicks] = useState(0);
 
   useEffect(() => {
     frameRef.current = frame;
@@ -160,8 +162,13 @@ export default function PlayPage() {
     cancelInFlight();
     const start = await apiSessionStart(baseUrl, levelId);
     sessionIdRef.current = start.sessionId;
-    setFrame(start.frame);
-    setResult(start.result);
+setFrame(start.frame);
+frameRef.current = start.frame;
+setResult(start.result);
+
+const t = Number(start?.result?.ticks ?? 0);
+localTicksRef.current = t;
+setLocalTicks(t);
     startHudTimer();
   }
 
@@ -212,9 +219,18 @@ export default function PlayPage() {
         move ?? undefined,
         { signal: abortRef.current.signal }
       );
-
-      setFrame(out.frame);
       setResult(out.result);
+
+// ✅ خلي ticks ما ينقصش (إذا السيرفر رجّع أقل)
+const serverTicks = Number(out?.result?.ticks ?? 0);
+if (Number.isFinite(serverTicks) && serverTicks > localTicksRef.current) {
+  localTicksRef.current = serverTicks;
+  setLocalTicks(serverTicks);
+}
+
+// ❌ ممنوع نطبق فريم السيرفر على حركة اللاعب (عشان ما في رجعة للخلف)
+// setFrame(out.frame);
+// frameRef.current = out.frame;
 
       if (out?.result?.lose) {
         await handleLose();
@@ -259,8 +275,7 @@ export default function PlayPage() {
         playerName,
         sessionId: sessionIdRef.current,
         timeMs: Math.max(1, Number(out?.result?.timeMs ?? 0)),
-        ticks: out.result.ticks,
-        alerts: out.result.alerts,
+ticks: Math.max(Number(out?.result?.ticks ?? 0), localTicksRef.current),        alerts: out.result.alerts,
       });
     } catch (e) {
       console.warn("save run failed:", e);
@@ -281,29 +296,34 @@ export default function PlayPage() {
     });
   }
 
-  function enqueueMove(mv) {
-    if (endingRef.current) return;
-    if (moveQueueRef.current.length > 8) return;
+ function enqueueMove(mv) {
+  if (endingRef.current) return;
+  if (moveQueueRef.current.length > 8) return;
 
-    const curFrame = frameRef.current;
-    const curLevel = levelRef.current;
+  const curFrame = frameRef.current;
+  const curLevel = levelRef.current;
+  if (!curFrame || !curLevel) return;
 
-    // ✅ Prediction: إذا ممنوع (جدار/حدود) لا تحرك ولا تبعت للسيرفر
-    const { nextFrame, ok } = predictMove(curFrame, curLevel, mv);
-    if (!ok) return;
+  // ✅ Prediction فوري + تحسب خطوة حتى لو blocked
+  const { nextFrame, consume } = predictMove(curFrame, curLevel, mv, { alwaysConsume: true });
 
-    // ✅ حركة فورية على الشاشة
-    setFrame(nextFrame);
-    frameRef.current = nextFrame;
-
-    // ✅ ابعت للسيرفر عشان يصير authoritative (تصحيح/حراس/نتيجة)
-    if (!busyRef.current) {
-      void stepServer(mv);
-      return;
-    }
-
-    moveQueueRef.current.push(mv);
+  if (consume) {
+    localTicksRef.current += 1;
+    setLocalTicks(localTicksRef.current);
   }
+
+  // ✅ تحديث فوري للشاشة (لو blocked رح يضل نفس المكان)
+  setFrame(nextFrame);
+  frameRef.current = nextFrame;
+
+  // ✅ ابعتي للسيرفر بس للمنطق (حراس/lose/win/حفظ)
+  if (!busyRef.current) {
+    void stepServer(mv);
+    return;
+  }
+
+  moveQueueRef.current.push(mv);
+}
 
   // ✅ تحميل الليفيل يتكرر لما يتغير /play/:levelId
   useEffect(() => {
@@ -373,8 +393,7 @@ export default function PlayPage() {
           <HUD
             title={title}
             timeText={timeText}
-            ticks={result?.ticks}
-            score={result?.score}
+ticks={Math.max(Number(result?.ticks ?? 0), localTicks)}            score={result?.score}
             hasKey={frame?.player?.hasKey}
           />
         </div>

@@ -1,5 +1,3 @@
-// client/src/game/predict/predictMove.js
-
 const cache = new WeakMap();
 
 function getIndex(level) {
@@ -11,7 +9,7 @@ function getIndex(level) {
 
   const walls = new Set();
   const arr = Array.isArray(level?.walls) ? level.walls : [];
-  for (const p of arr) walls.add(`${p.x},${p.y}`);
+  for (const p of arr) walls.add(`${Number(p.x)},${Number(p.y)}`);
 
   const key = level?.key ? { x: Number(level.key.x), y: Number(level.key.y) } : null;
   const home = level?.home ? { x: Number(level.home.x), y: Number(level.home.y) } : null;
@@ -26,53 +24,59 @@ function getIndex(level) {
 function inside(idx, x, y) {
   return x >= 0 && y >= 0 && x < idx.w && y < idx.h;
 }
-
 function isWall(idx, x, y) {
   return idx.walls.has(`${x},${y}`);
 }
-
 function delta(mv) {
   if (mv === "U") return { dx: 0, dy: -1 };
   if (mv === "D") return { dx: 0, dy: 1 };
   if (mv === "L") return { dx: -1, dy: 0 };
   if (mv === "R") return { dx: 1, dy: 0 };
-  return { dx: 0, dy: 0 }; // S أو null
+  return { dx: 0, dy: 0 };
 }
 
 /**
- * Prediction منظم:
- * - يمنع الخروج عن الحدود
- * - يمنع دخول الجدران
- * - يحدّث hasKey فورًا إذا اللاعب وصل المفتاح
- *
- * بيرجع:
- * { nextFrame, ok }
- * ok=false يعني الحركة ممنوعة (جدار/حدود) وما لازم نبعت request للسيرفر
+ * ✅ مهم:
+ * - alwaysConsume=true: أي كبسة تتحسب "خطوة" حتى لو اصطدم بجدار/حدود/بيت بدون مفتاح
+ * return: { nextFrame, consume, moved }
  */
-export function predictMove(frame, level, mv) {
+export function predictMove(frame, level, mv, { alwaysConsume = true } = {}) {
   const idx = getIndex(level);
-  if (!idx || !frame?.player || !mv) return { nextFrame: frame, ok: false };
+  if (!idx || !frame?.player || !mv) {
+    return { nextFrame: frame, consume: false, moved: false };
+  }
 
   const { dx, dy } = delta(mv);
-  if (!dx && !dy) return { nextFrame: frame, ok: true };
+  if (!dx && !dy) return { nextFrame: frame, consume: false, moved: false };
 
   const px = Number(frame.player.x);
   const py = Number(frame.player.y);
   const nx = px + dx;
   const ny = py + dy;
 
-  if (!inside(idx, nx, ny)) return { nextFrame: frame, ok: false };
-  if (isWall(idx, nx, ny)) return { nextFrame: frame, ok: false };
+  const hasKeyNow = !!frame.player.hasKey;
 
-  // clone خفيف
-  const next = structuredClone ? structuredClone(frame) : JSON.parse(JSON.stringify(frame));
-  next.player.x = nx;
-  next.player.y = ny;
+  // ممنوعات الحركة (بس still consume إذا alwaysConsume)
+  const blocked =
+    !inside(idx, nx, ny) ||
+    isWall(idx, nx, ny) ||
+    (idx.home &&
+      nx === idx.home.x &&
+      ny === idx.home.y &&
+      idx.keyRequired &&
+      !hasKeyNow);
 
-  // ✅ التقط المفتاح فورًا
-  if (idx.key && nx === idx.key.x && ny === idx.key.y) {
-    next.player.hasKey = true;
+  if (blocked) {
+    return { nextFrame: frame, consume: !!alwaysConsume, moved: false };
   }
 
-  return { nextFrame: next, ok: true };
+  // ✅ حركة فورية (clone خفيف)
+  const nextHasKey = hasKeyNow || (idx.key && nx === idx.key.x && ny === idx.key.y);
+
+  const nextFrame = {
+    ...frame,
+    player: { ...frame.player, x: nx, y: ny, hasKey: nextHasKey },
+  };
+
+  return { nextFrame, consume: true, moved: true };
 }
