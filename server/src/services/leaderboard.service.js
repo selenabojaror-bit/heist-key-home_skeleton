@@ -2,7 +2,6 @@ import { scoresRepo } from "../db/repositories/scores.repo.js";
 import { computeScore } from "./score.util.js";
 
 
-// ✅ مقارنة الأفضلية: score ثم time ثم ticks
 function isBetterRun(newRun, oldRow) {
   const ns = newRun.score ?? null;
   const os = oldRow.score ?? null;
@@ -77,7 +76,6 @@ export function leaderboardService(db) {
         throw err;
       }
 
-      // ✅ score الحقيقي حسب baseline
       const computedScore = computeScore(levelId, t, k);
       await db.exec("BEGIN IMMEDIATE;");
       try {

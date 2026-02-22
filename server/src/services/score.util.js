@@ -1,9 +1,8 @@
 // server/src/services/score.util.js
 
-const W_TIME = 0.7;  // 70% وقت
-const W_TICKS = 0.3; // 30% خطوات
+const W_TIME = 0.7;  // 70% 
+const W_TICKS = 0.3; // 30% 
 
-// Baselines ثابتة
 const LEVEL_BASELINES = {
   L1: { refTimeMs: 9000, optimalSteps: 60 },
   L2: { refTimeMs: 6000, optimalSteps: 52 },
@@ -15,7 +14,6 @@ function clamp01(x) {
   return Math.max(0, Math.min(1, x));
 }
 
-// ✅ نفس حساب السكور بالضبط اللي كان بالـleaderboard
 export function computeScore(levelId, timeMs, ticks) {
   const base = LEVEL_BASELINES[levelId];
   if (!base) return null;

@@ -37,7 +37,7 @@ export async function createApp() {
   // ✅ NEW: one singleton service for all requests
   app.locals.sessionSvc = sessionService({
     ...config,
-    GUARD_MS: 300, // ✅ سرعة الحارس ثابتة 300ms
+    GUARD_MS: 300, // ✅ 
   });
 
   const db = await openSqlite(config);

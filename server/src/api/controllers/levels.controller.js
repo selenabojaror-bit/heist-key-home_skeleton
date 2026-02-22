@@ -17,7 +17,6 @@ export function getLevel(req, res, next) {
       throw err;
     }
 
-    // رجعة متوافقة مع الفرونت اللي كتبناه قبل: meta + data
     res.json({
       id: level.id,
       name: level.name,

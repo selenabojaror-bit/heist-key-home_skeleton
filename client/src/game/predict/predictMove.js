@@ -56,7 +56,6 @@ export function predictMove(frame, level, mv) {
 
   const hasKeyNow = !!frame.player.hasKey;
 
-  // ممنوع تفوت البيت بدون مفتاح إذا مطلوب
   if (
     idx.home &&
     nx === idx.home.x &&

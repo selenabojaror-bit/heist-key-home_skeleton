@@ -1,5 +1,4 @@
 export function scoresRepo(db) {
-  // ✅ ترتيب موحّد: أعلى score أفضل، وبالتعادل أسرع وقت، وبالتعادل أقل ticks
   function orderByClause() {
     return `
       CASE WHEN score IS NULL THEN 1 ELSE 0 END ASC,
@@ -32,7 +31,6 @@ export function scoresRepo(db) {
       return res.lastID;
     },
 
-    // ✅ أفضل محاولة للاعب ضمن ليفيل (حسب score ثم time ثم ticks)
     async getBestByPlayerLevel(levelId, playerName) {
       return db.get(
         `
@@ -47,7 +45,6 @@ export function scoresRepo(db) {
       );
     },
 
-    // ✅ تحديث السجل بدل إدخال سجل جديد
     async updateScore(id, { timeMs, ticks, score, alerts }) {
       await db.run(
         `
@@ -60,7 +57,6 @@ export function scoresRepo(db) {
       return id;
     },
 
-    // ✅ min/max ديناميكيًا لكل ليفيل (للتطبيع)
     async getLevelStats(levelId) {
       return db.get(
         `
@@ -78,7 +74,6 @@ export function scoresRepo(db) {
       );
     },
 
-    // ✅ leaderboard: أفضل سجل واحد لكل لاعب (حتى لو في تكرارات قديمة)
     async getTopScoresByLevel(levelId, limit = 10) {
       return db.all(
         `

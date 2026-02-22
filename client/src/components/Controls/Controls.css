@@ -1,17 +1,16 @@
-/* ✅ أصغر من قبل */
 .controls {
-  gap: 10px;            /* كان كبير */
-  margin-top: 14px;     /* يقلّل المساحة تحت */
+  gap: 10px;            
+  margin-top: 14px;    
 }
 
 .controls button {
-  width: 48px;          /* كان أكبر */
-  height: 48px;         /* كان أكبر */
-  border-radius: 14px;  /* أقل شوي */
-  font-size: 18px;      /* تصغير الأيقونة/السهم */
+  width: 48px;         
+  height: 48px;         
+  border-radius: 14px;  
+  font-size: 18px;      
 }
 
-/* لو عندك زر كبير للـStay أو غيره */
+
 .controls .stayBtn,
 .controls .stay {
   min-width: 84px;

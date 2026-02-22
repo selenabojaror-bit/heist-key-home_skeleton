@@ -15,10 +15,10 @@ function sanitizeLevel(lvl) {
   return {
     ...lvl,
 
-    // ✅ أهم شرط: ما في كاميرات (حتى لو موجودة بالـ JSON)
+    
     cameras: [],
 
-    // ✅ توحيد rules + إجبار القيم المطلوبة
+    
     rules: {
       ...(lvl.rules || {}),
       maxAlerts: 0,

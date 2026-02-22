@@ -1,7 +1,6 @@
 export function errorHandler(err, req, res, next) {
   const status = Number(err?.status) || 500;
 
-  // رسالة بسيطة وآمنة للـclient
   const message =
     typeof err?.message === "string" && err.message.trim()
       ? err.message.trim()
@@ -9,7 +8,6 @@ export function errorHandler(err, req, res, next) {
       ? "server_error"
       : "bad_request";
 
-  // لوج بالسيرفر (للتصحيح)
   if (status >= 500) {
     console.error("❌ SERVER ERROR:", err);
   } else {

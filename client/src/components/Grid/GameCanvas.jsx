@@ -13,11 +13,9 @@ function resizeCanvasToContainer(canvas) {
   const pxW = Math.floor(cssW * dpr);
   const pxH = Math.floor(cssH * dpr);
 
-  // خليه ياخذ حجم CSS تبع الحاوية
   canvas.style.width = "100%";
   canvas.style.height = "100%";
 
-  // إذا ما تغيّر الحجم ما داعي نعمل reset
   if (canvas.width === pxW && canvas.height === pxH) return false;
 
   canvas.width = pxW;
@@ -30,7 +28,6 @@ export default function GameCanvas({ level, frame }) {
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
 
-  // init renderer مرة واحدة
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -45,14 +42,12 @@ export default function GameCanvas({ level, frame }) {
 
     window.addEventListener("resize", onResize);
 
-    // أول مرة
     onResize();
 
     return () => window.removeEventListener("resize", onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // redraw لما يتغير level/frame
   useEffect(() => {
     const canvas = canvasRef.current;
     const renderer = rendererRef.current;

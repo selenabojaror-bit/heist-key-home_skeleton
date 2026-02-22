@@ -38,18 +38,14 @@ function moveDelta(move) {
   if (move === "D") return { dx: 0, dy: 1 };
   if (move === "L") return { dx: -1, dy: 0 };
   if (move === "R") return { dx: 1, dy: 0 };
-  return { dx: 0, dy: 0 }; // "S" أو undefined
+  return { dx: 0, dy: 0 }; 
 }
 
 function manhattan(ax, ay, bx, by) {
   return Math.abs(ax - bx) + Math.abs(ay - by);
 }
 
-/**
- * lose إذا:
- * - player على نفس مربع guard أو ملاصق له (d <= 1)
- * - أو تقابلوا (swap)
- */
+
 function caughtByGuard(guardsPrev, guardsNow, playerPrev, playerNow) {
   for (const g of guardsPrev) {
     if (manhattan(g.x, g.y, playerNow.x, playerNow.y) <= 1) return true;
@@ -70,7 +66,7 @@ function caughtByGuard(guardsPrev, guardsNow, playerPrev, playerNow) {
   return false;
 }
 
-// ===== Guards =====
+
 function initGuards(level) {
   const guards = Array.isArray(level?.guards) ? level.guards : [];
   return guards.map((g, idx) => {
