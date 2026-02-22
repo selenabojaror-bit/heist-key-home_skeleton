@@ -179,72 +179,107 @@ height: min(900px, 100vh);/* ✅ أكبر شوي */ /* ✅ تصغير واضح *
   user-select: none;
 }
 
-/* ✅ input شفاف فوق خانة الاسم (عدّلي الأرقام حسب مكان الخانة) */
-.nameArtInput {
+/* ===========================
+   ✅ Enter Your Name (Image Modal) — READY
+   =========================== */
+
+/* الخلفية */
+.modalOverlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.58);
+  display: grid;
+  place-items: center;
+  z-index: 9999;
+}
+
+/* ✅ حجم المودال (أصغر ومنطقي) */
+.nameModalArt{
+  position: relative;
+  width: min(620px, 78vw);     /* ✅ صغّرت الحجم */
+  max-width: 620px;
+  aspect-ratio: 16 / 9;        /* ✅ نفس أبعاد الصورة */
+}
+
+/* الصورة */
+.nameArtImg{
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  pointer-events: none;        /* ✅ مهم عشان الأزرار الشفافة تشتغل */
+}
+
+/* ✅ input شفاف فوق خانة الاسم */
+.nameArtInput{
   position: absolute;
-  left: 23%;
-  top: 42%;
-  width: 49%;
-  height: 9%;
+  left: 18%;
+  top: 43%;
+  width: 64%;
+  height: 8.5%;
 
-background: transparent;
-border: none;             /* للتجربة */
-  border-radius: 12px;
-
-  color: #d5db85;
-  font-size: clamp(20px, 5vw, 22px);
-  padding: 0 14px;
+  background: transparent;
+  border: none;
   outline: none;
 
+  color: #d5db85;
+  font-size: clamp(14px, 2.1vw, 18px);
+  padding: 0 14px;
+
   font-family: "Rubik", "Segoe UI", Arial, sans-serif;
-font-weight: 600;
-letter-spacing: 0.3px;
-text-shadow: 0 2px 6px rgba(0,0,0,0.65);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.65);
 }
 
-/* ✅ Enter hotspot (عدّلي حسب مكان زر Enter بالصورة) */
-.nameArtEnter {
+/* ✅ Hotspots شفافة فوق الأزرار */
+.nameArtEnter,
+.nameArtCancel{
   position: absolute;
-  left: 20%;
-  top: 55%;
-  width: 28%;
-  height: 14%;
+  top: 63%;
+  height: 16%;
 
- background: transparent;
-border: none;          /* للتجربة */
+  background: transparent;
+  border: none;
   border-radius: 14px;
-
   cursor: pointer;
 }
 
-/* ✅ Cancel hotspot (عدّلي حسب مكان زر Cancel بالصورة) */
-.nameArtCancel {
-  position: absolute;
-  left: 51%;
-  top: 55%;
-  width: 30%;
-  height: 14%;
+/* Enter (يسار) */
+.nameArtEnter{
+  left: 17%;
+  width: 33%;
+}
 
-background: transparent;
-border: none;    /* للتجربة */
-  border-radius: 14px;
-
-  cursor: pointer;
+/* Cancel (يمين) */
+.nameArtCancel{
+  left: 52%;
+  width: 33%;
 }
 
 /* خطأ تحت الصورة */
-.nameArtErr {
+.nameArtErr{
   position: absolute;
   left: 50%;
-  bottom: 3%;
+  bottom: 4%;
   transform: translateX(-50%);
+
   background: rgba(255, 65, 65, 0.18);
   border: 1px solid rgba(255, 65, 65, 0.25);
   color: #ffd0d0;
   padding: 8px 12px;
   border-radius: 12px;
   font-weight: 800;
+  font-size: 14px;
 }
+
+/* ✅ للموبايل */
+@media (max-width: 480px){
+  .nameModalArt{ width: min(520px, 92vw); }
+  .nameArtInput{ font-size: 16px; }
+}
+
 /* ===== Hall of Fame table styles (كما كانوا) ===== */
 /* ✅ خلي صورة الهول خلف كلشي */
 .hofArtImg{
