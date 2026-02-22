@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { predictMove } from "../../game/predict/predictMove";
+
 import {
   apiGetLevels,
   apiGetLevel,
@@ -15,56 +17,6 @@ import Controls from "../../components/Controls/Controls";
 import "./PlayPage.css";
 
 const POLL_MS = 120;
-// ✅ حركة فورية محليًا (Prediction)
-// بتحاول تتعرف على شكل إحداثيات اللاعب بأي اسم شائع
-function applyMoveLocal(prevFrame, mv) {
-  if (!prevFrame || !prevFrame.player || !mv) return prevFrame;
-
-  const dx = mv === "L" ? -1 : mv === "R" ? 1 : 0;
-  const dy = mv === "U" ? -1 : mv === "D" ? 1 : 0;
-  if (dx === 0 && dy === 0) return prevFrame;
-
-  const f = structuredClone ? structuredClone(prevFrame) : JSON.parse(JSON.stringify(prevFrame));
-  const p = f.player;
-
-  // 1) x/y
-  if (typeof p.x === "number" && typeof p.y === "number") {
-    p.x += dx;
-    p.y += dy;
-    return f;
-  }
-
-  // 2) row/col
-  if (typeof p.row === "number" && typeof p.col === "number") {
-    p.row += dy;
-    p.col += dx;
-    return f;
-  }
-
-  // 3) r/c
-  if (typeof p.r === "number" && typeof p.c === "number") {
-    p.r += dy;
-    p.c += dx;
-    return f;
-  }
-
-  // 4) pos object
-  if (p.pos && typeof p.pos === "object") {
-    if (typeof p.pos.x === "number" && typeof p.pos.y === "number") {
-      p.pos.x += dx;
-      p.pos.y += dy;
-      return f;
-    }
-    if (typeof p.pos.row === "number" && typeof p.pos.col === "number") {
-      p.pos.row += dy;
-      p.pos.col += dx;
-      return f;
-    }
-  }
-
-  // إذا ما عرفنا شكل الإحداثيات، ما نغير اشي
-  return prevFrame;
-}
 
 function fmtTime(ms) {
   const total = Math.max(0, ms);
@@ -91,6 +43,11 @@ function nextFromId(id) {
   if (next === "L4") return null;
   return next;
 }
+const frameRef = useRef(null);
+const levelRef = useRef(null);
+
+useEffect(() => { frameRef.current = frame; }, [frame]);
+useEffect(() => { levelRef.current = level; }, [level]);
 
 export default function PlayPage() {
   const nav = useNavigate();
@@ -175,8 +132,8 @@ const [overlay, setOverlay] = useState({
     stopPoll();
     pollTimerRef.current = setInterval(() => {
       if (endingRef.current) return;
-      if (busyRef.current) return;
       if (moveQueueRef.current.length) return;
+      if (busyRef.current) return;
       void stepServer(null);
     }, POLL_MS);
   }
@@ -317,19 +274,22 @@ setOverlay({
 });
   }
 
- function enqueueMove(mv) {
+  function enqueueMove(mv) {
   if (endingRef.current) return;
   if (moveQueueRef.current.length > 8) return;
 
-  // ✅ 1) حرّك فورًا محليًا (بدون ما نستنى السيرفر)
-  setFrame((prev) => applyMoveLocal(prev, mv));
+  const curFrame = frameRef.current;
+  const curLevel = levelRef.current;
 
-  // ✅ 2) إذا في poll شغال، اقصّيه عشان ما يأخر الحركة
-  if (busyRef.current) {
-    cancelInFlight(); // يقطع request الحالي لو كان poll
-  }
+  // ✅ Prediction: إذا ممنوع (جدار/حدود) لا تحرك ولا تبعت للسيرفر
+  const { nextFrame, ok } = predictMove(curFrame, curLevel, mv);
+  if (!ok) return;
 
-  // ✅ 3) ابعتي الحركة للسيرفر (authoritative) - رح يصحح إذا في فرق
+  // ✅ حركة فورية على الشاشة
+  setFrame(nextFrame);
+  frameRef.current = nextFrame;
+
+  // ✅ ابعت للسيرفر عشان يصير authoritative (تصحيح/حراس/نتيجة)
   if (!busyRef.current) {
     void stepServer(mv);
     return;
